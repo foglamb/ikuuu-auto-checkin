@@ -16,6 +16,7 @@ jobs:
       HOST: ${{ secrets.HOST }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_TO: ${{ secrets.TELEGRAM_TO }}
+      PUSHPLUS_TOKENS: ${{ secrets.PUSHPLUS_TOKENS }}
 
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +32,13 @@ jobs:
         run: |
           node main.js
 
-      - name: Notify
+      - name: Save result to file
+        shell: bash
+        run: |
+          echo '${{ steps.checkin.outputs.result }}' > checkin_result.txt
+          echo "Result saved for notification"
+
+      - name: Telegram Notify
         if: ${{ always() && env.TELEGRAM_TOKEN && env.TELEGRAM_TO }}
         uses: appleboy/telegram-action@master
         with:
@@ -44,3 +51,42 @@ jobs:
             ${{ steps.checkin.outputs.result  }}
 
             [任务详情](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+      - name: PushPlus Notify
+        if: ${{ always() && env.PUSHPLUS_TOKENS }}
+        shell: bash
+        run: |
+          # 读取签到结果
+          CHECKIN_RESULT=$(cat checkin_result.txt)
+          
+          # 分割PushPlus Tokens（多个token用逗号分隔）
+          IFS=',' read -ra TOKENS <<< "$PUSHPLUS_TOKENS"
+          
+          for TOKEN in "${TOKENS[@]}"; do
+            # 去除空格
+            TOKEN=$(echo $TOKEN | xargs)
+            
+            if [ ! -z "$TOKEN" ]; then
+              echo "Sending PushPlus notification to token: $TOKEN"
+              
+              # 准备发送数据
+              TITLE="iKuuu 自动签到结果"
+              CONTENT="$CHECKIN_RESULT"
+              
+              # 发送PushPlus请求
+              RESPONSE=$(curl -s -X POST \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "token": "'"$TOKEN"'",
+                  "title": "'"$TITLE"'",
+                  "content": "'"$CONTENT"'",
+                  "template": "html"
+                }' \
+                "https://www.pushplus.plus/send")
+              
+              echo "PushPlus response: $RESPONSE"
+              
+              # 添加延迟避免请求过快
+              sleep 1
+            fi
+          done
