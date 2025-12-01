@@ -32,11 +32,12 @@ jobs:
         run: |
           node main.js
 
-      - name: Save result to file
+      - name: Save result for notification
         shell: bash
         run: |
-          echo '${{ steps.checkin.outputs.result }}' > checkin_result.txt
-          echo "Result saved for notification"
+          echo 'RESULTS<<EOF' >> $GITHUB_ENV
+          echo '${{ steps.checkin.outputs.result }}' >> $GITHUB_ENV
+          echo 'EOF' >> $GITHUB_ENV
 
       - name: Telegram Notify
         if: ${{ always() && env.TELEGRAM_TOKEN && env.TELEGRAM_TO }}
@@ -56,8 +57,9 @@ jobs:
         if: ${{ always() && env.PUSHPLUS_TOKENS }}
         shell: bash
         run: |
-          # 读取签到结果
-          CHECKIN_RESULT=$(cat checkin_result.txt)
+          # 准备推送内容
+          TITLE="iKuuu 自动签到结果"
+          CONTENT="${{ steps.checkin.outputs.result }}"
           
           # 分割PushPlus Tokens（多个token用逗号分隔）
           IFS=',' read -ra TOKENS <<< "$PUSHPLUS_TOKENS"
@@ -69,10 +71,6 @@ jobs:
             if [ ! -z "$TOKEN" ]; then
               echo "Sending PushPlus notification to token: $TOKEN"
               
-              # 准备发送数据
-              TITLE="iKuuu 自动签到结果"
-              CONTENT="$CHECKIN_RESULT"
-              
               # 发送PushPlus请求
               RESPONSE=$(curl -s -X POST \
                 -H "Content-Type: application/json" \
@@ -80,11 +78,15 @@ jobs:
                   "token": "'"$TOKEN"'",
                   "title": "'"$TITLE"'",
                   "content": "'"$CONTENT"'",
-                  "template": "html"
+                  "template": "markdown"
                 }' \
                 "https://www.pushplus.plus/send")
               
-              echo "PushPlus response: $RESPONSE"
+              if echo "$RESPONSE" | grep -q '"code":200'; then
+                echo "✓ PushPlus notification sent successfully"
+              else
+                echo "✗ PushPlus notification failed: $RESPONSE"
+              fi
               
               # 添加延迟避免请求过快
               sleep 1
