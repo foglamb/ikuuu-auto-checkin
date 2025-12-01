@@ -3,6 +3,7 @@
 import { appendFileSync } from "fs";
 
 const host = process.env.HOST || "ikuuu.one";
+const pushplusTokens = process.env.PUSHPLUS_TOKENS ? process.env.PUSHPLUS_TOKENS.split(',') : [];
 
 const logInUrl = `https://${host}/auth/login`;
 const checkInUrl = `https://${host}/user/checkin`;
@@ -21,6 +22,30 @@ function formatCookie(rawCookieArray) {
   return Array.from(cookiePairs)
     .map(([key, value]) => `${key}=${value}`)
     .join("; ");
+}
+
+// 发送PushPlus通知
+async function sendPushPlusNotification(token, title, content) {
+  try {
+    const response = await fetch("https://www.pushplus.plus/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        token: token.trim(),
+        title: title,
+        content: content,
+        template: "markdown"
+      }),
+    });
+
+    const data = await response.json();
+    return data.code === 200;
+  } catch (error) {
+    console.error("PushPlus通知发送失败:", error.message);
+    return false;
+  }
 }
 
 // 登录获取 Cookie
@@ -78,17 +103,44 @@ async function checkIn(account) {
   return data.msg;
 }
 
-// 处理
+// 处理单个账户
 async function processSingleAccount(account) {
   const cookedAccount = await logIn(account);
-
   const checkInResult = await checkIn(cookedAccount);
-
-  return checkInResult;
+  
+  // 如果账户配置中有单独的PushPlus Token，发送单独通知
+  if (account.pushplusToken) {
+    const title = `iKuuu签到 - ${account.name}`;
+    const content = `**${account.name} 签到结果**\n\n${checkInResult}`;
+    
+    console.log(`${account.name}: 发送PushPlus通知...`);
+    await sendPushPlusNotification(account.pushplusToken, title, content);
+  }
+  
+  return {
+    account: account.name,
+    result: checkInResult,
+    pushplusSent: !!account.pushplusToken
+  };
 }
 
 function setGitHubOutput(name, value) {
   appendFileSync(process.env.GITHUB_OUTPUT, `${name}<<EOF\n${value}\nEOF\n`);
+}
+
+// 发送全局PushPlus通知
+async function sendGlobalPushPlusNotifications(resultLines) {
+  if (pushplusTokens.length === 0) return;
+  
+  const title = "iKuuu自动签到结果汇总";
+  const content = resultLines.join("\n");
+  
+  for (const token of pushplusTokens) {
+    if (token.trim()) {
+      console.log(`发送全局PushPlus通知到: ${token.substring(0, 10)}...`);
+      await sendPushPlusNotification(token, title, content);
+    }
+  }
 }
 
 // 入口
@@ -119,7 +171,8 @@ async function main() {
   let hasError = false;
 
   const resultLines = results.map((result, index) => {
-    const accountName = accounts[index].name;
+    const account = accounts[index];
+    const accountName = account.name;
 
     const isSuccess = result.status === "fulfilled";
 
@@ -128,7 +181,7 @@ async function main() {
     }
 
     const icon = isSuccess ? "✅" : "❌";
-    const message = isSuccess ? result.value : result.reason.message;
+    const message = isSuccess ? result.value.result : result.reason.message;
 
     const line = `${accountName}: ${icon} ${message}`;
 
@@ -138,6 +191,9 @@ async function main() {
   });
 
   const resultMsg = resultLines.join("\n");
+
+  // 发送全局PushPlus通知
+  await sendGlobalPushPlusNotifications(resultLines);
 
   setGitHubOutput("result", resultMsg);
 
