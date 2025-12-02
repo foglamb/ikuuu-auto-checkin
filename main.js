@@ -145,6 +145,9 @@ async function sendGlobalPushPlusNotifications(resultLines) {
 
 // 入口
 async function main() {
+  console.log("开始执行签到任务...");
+  console.log(`Host: ${host}`);
+  
   let accounts;
 
   try {
@@ -152,11 +155,19 @@ async function main() {
       throw new Error("❌ 未配置账户信息。");
     }
 
+    console.log("ACCOUNTS环境变量内容:", process.env.ACCOUNTS.substring(0, 50) + "...");
+    
+    // 尝试解析账户信息
     accounts = JSON.parse(process.env.ACCOUNTS);
+    
+    if (!Array.isArray(accounts)) {
+      throw new Error("账户信息应该是一个数组");
+    }
+    
+    console.log(`找到 ${accounts.length} 个账户`);
+    
   } catch (error) {
-    const message = `❌ ${
-      error.message.includes("JSON") ? "账户信息配置格式错误。" : error.message
-    }`;
+    const message = `❌ 账户信息配置格式错误: ${error.message}\n\n请确保ACCOUNTS是一个有效的JSON数组，格式如下：\n\n[{\n  "name": "用户名",\n  "email": "邮箱",\n  "passwd": "密码"\n}]`;
     console.error(message);
     setGitHubOutput("result", message);
     process.exit(1);
@@ -198,8 +209,14 @@ async function main() {
   setGitHubOutput("result", resultMsg);
 
   if (hasError) {
+    console.log("部分账户签到失败");
     process.exit(1);
+  } else {
+    console.log("所有账户签到成功");
   }
 }
 
-main();
+main().catch(error => {
+  console.error("程序执行出错:", error);
+  process.exit(1);
+});
